@@ -2,99 +2,90 @@ import streamlit as st
 from googleapiclient.discovery import build
 import time
 
-# --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="AI Assistant YouTuber", page_icon="🎙️")
+# --- SETUP TAMPILAN ---
+st.set_page_config(page_title="AI Assistant Streamer", page_icon="🎙️")
+st.title("🎙️ AI Assistant YouTuber")
+st.write("Hubungkan Live Stream kamu dengan Asisten AI!")
 
-# --- AMBIL API KEY DARI BRANKAS (SECRETS) ---
-# Kamu harus isi YOUTUBE_API_KEY di settingan Secrets Streamlit Cloud!
+# --- AMBIL API KEY DARI SECRETS ---
 try:
     api_key = st.secrets["YOUTUBE_API_KEY"]
 except:
-    st.error("⚠️ Error: API Key tidak ditemukan di brankas Secrets!")
+    st.error("❌ API Key tidak ditemukan di Secrets!")
     st.stop()
 
-# --- FUNGSI SUARA (BROWSER BASED) ---
-def panggil_suara_ai(teks):
-    js_code = f"""
-        <script>
+# --- FUNGSI SUARA ---
+def bunyikan_ai(teks):
+    js_code = f"""<script>
         var msg = new SpeechSynthesisUtterance('{teks}');
         msg.lang = 'id-ID';
         window.speechSynthesis.speak(msg);
-        </script>
-    """
+    </script>"""
     st.components.v1.html(js_code, height=0)
 
-# --- TAMPILAN WEBSITE ---
-st.title("🎙️ AI Assistant Streamer")
-st.write("Cukup masukkan handle YouTube-mu, dan AI akan otomatis menyapa saat ada Subrek/Like!")
+# --- INPUT 2 KOLOM ---
+col_a, col_b = st.columns(2)
+link_live = col_a.text_input("🔗 Link Live Video", placeholder="https://www.youtube.com/watch?v=...")
+user_handle = col_b.text_input("👤 Handle Channel", placeholder="@BoloGamer")
 
-# Input buat orang lain (User)
-handle_input = st.text_input("Masukkan Handle YouTube (Contoh: @BoloGamer)", placeholder="@")
-
-if st.button("Aktifkan Asisten AI 🚀"):
-    if len(handle_input) < 2:
-        st.warning("Masukkan handle yang bener dulu, Bolo!")
+if st.button("🔥 AKTIFKAN ASISTEN AI"):
+    if not link_live or not user_handle:
+        st.warning("Isi Link Live dan Handle dulu ya, Bolo!")
     else:
         try:
+            # Ambil ID Video dari Link
+            if "v=" in link_live:
+                v_id = link_live.split("v=")[1].split("&")[0]
+            else:
+                v_id = link_live.split("/")[-1]
+
             youtube = build('youtube', 'v3', developerKey=api_key)
             
-            # 1. Cari ID Channel User
-            search_ch = youtube.search().list(q=handle_input, type="channel", part="id").execute()
-            if not search_ch['items']:
-                st.error("Channel tidak ditemukan!")
+            # 1. Cek Detail Video & Channel ID Pemiliknya
+            v_req = youtube.videos().list(part="snippet,statistics", id=v_id).execute()
+            
+            if not v_req['items']:
+                st.error("Video tidak ditemukan! Cek linknya lagi.")
                 st.stop()
             
-            channel_id = search_ch['items'][0]['id']['channelId']
-            
-            # 2. Cari Video yang lagi LIVE
-            search_live = youtube.search().list(
-                channelId=channel_id, type="video", eventType="live", part="id"
-            ).execute()
-            
-            if not search_live['items']:
-                st.warning("Channel ini lagi gak Live. Mulai Live dulu di YouTube baru klik tombol ini!")
+            data_video = v_req['items'][0]
+            owner_ch_id = data_video['snippet']['channelId']
+            status_live = data_video['snippet'].get('liveBroadcastContent', 'none')
+
+            # 2. Verifikasi: Apakah video ini lagi LIVE?
+            if status_live != "live":
+                st.warning(f"Video ini statusnya: {status_live}. Harus lagi LIVE baru bisa dipantau!")
                 st.stop()
-            
-            video_id = search_live['items'][0]['id']['videoId']
-            
-            st.success(f"✅ Terhubung ke @{handle_input}! AI sedang berjaga...")
-            panggil_suara_ai(f"Halo streamer {handle_input}, asisten A I sudah mulai berjaga. Selamat streaming!")
+
+            st.success(f"✅ Terhubung! Memantau Live: {data_video['snippet']['title']}")
+            bunyikan_ai(f"Halo streamer {user_handle}, asisten A I sudah mendeteksi siaran langsung anda. Selamat streaming!")
 
             # Ambil Data Awal
-            ch_info = youtube.channels().list(part="statistics", id=channel_id).execute()
-            v_info = youtube.videos().list(part="statistics", id=video_id).execute()
-            
-            sub_lama = int(ch_info['items'][0]['statistics']['subscriberCount'])
-            like_lama = int(v_info['items'][0]['statistics'].get('likeCount', 0))
+            s_lama = int(youtube.channels().list(part="statistics", id=owner_ch_id).execute()['items'][0]['statistics']['subscriberCount'])
+            l_lama = int(data_video['statistics'].get('likeCount', 0))
 
-            # Tampilan Dashboard Real-time
-            col1, col2 = st.columns(2)
-            metrik_sub = col1.metric("Subscriber", sub_lama)
-            metrik_like = col2.metric("Likes", like_lama)
-            
+            m1, m2 = st.columns(2)
+            met_sub = m1.metric("Subscriber", s_lama)
+            met_like = m2.metric("Likes", l_lama)
+
             # --- LOOPING MONITOR ---
             while True:
-                time.sleep(25) # Jeda agak lama biar API Key kamu gak cepet habis (Limit Google)
+                time.sleep(25)
+                v_up = youtube.videos().list(part="statistics", id=v_id).execute()
+                c_up = youtube.channels().list(part="statistics", id=owner_ch_id).execute()
                 
-                ch_up = youtube.channels().list(part="statistics", id=channel_id).execute()
-                v_up = youtube.videos().list(part="statistics", id=video_id).execute()
-                
-                sub_baru = int(ch_up['items'][0]['statistics']['subscriberCount'])
-                like_baru = int(v_up['items'][0]['statistics'].get('likeCount', 0))
+                s_baru = int(c_up['items'][0]['statistics']['subscriberCount'])
+                l_baru = int(v_up['items'][0]['statistics'].get('likeCount', 0))
 
-                # Update Angka di Layar
-                metrik_sub.metric("Subscriber", sub_baru, sub_baru - sub_lama)
-                metrik_like.metric("Likes", like_baru, like_baru - like_lama)
+                met_sub.metric("Subscriber", s_baru, s_baru - s_lama)
+                met_like.metric("Likes", l_baru, l_baru - l_lama)
 
-                if sub_baru > sub_lama:
-                    msg = "Wih, ada subrek baru! Makasih banyak ya Bolo!"
-                    panggil_suara_ai(msg)
-                    sub_lama = sub_baru
-
-                if like_baru > like_lama:
-                    msg = "Mantap jempolnya! Makasih like-nya Bolo!"
-                    panggil_suara_ai(msg)
-                    like_lama = like_baru
+                if s_baru > s_lama:
+                    bunyikan_ai("Wih, ada subrek baru masuk! Makasih ya Bolo!")
+                    s_lama = s_baru
+                if l_baru > l_lama:
+                    bunyikan_ai("Mantap, like-nya nambah! Makasih jempolnya Bolo!")
+                    l_lama = l_baru
 
         except Exception as e:
-            st.error(f"Terjadi masalah: {e}")
+            st.error(f"Gagal koneksi: {e}")
